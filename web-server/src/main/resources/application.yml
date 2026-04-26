@@ -42,6 +42,10 @@ management:
     tags:
       service: web
       instance: ${INSTANCE_ID:web-local}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        email.send.duration: true
 
 app:
   cassandra:

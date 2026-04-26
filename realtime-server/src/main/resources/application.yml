@@ -32,6 +32,9 @@ management:
     tags:
       service: realtime
       instance: ${INSTANCE_ID:rt-local}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 app:
   jwt:
