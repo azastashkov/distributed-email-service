@@ -71,18 +71,20 @@ public class EmailController {
     }
 
     @GetMapping("/emails/{emailId}")
-    public EmailFull getOne(@AuthenticationPrincipal AuthenticatedUser user,
-                            @PathVariable UUID emailId) {
+    public ResponseEntity<EmailFull> getOne(@AuthenticationPrincipal AuthenticatedUser user,
+                                            @PathVariable UUID emailId) {
         String key = cacheKey(user.userId(), emailId);
         String cached = redis.opsForValue().get(key);
         if (cached != null) {
             try {
                 Counter.builder("email.cache.hits.total").register(meterRegistry).increment();
-                return objectMapper.readValue(cached, EmailFull.class);
+                return ResponseEntity.ok(objectMapper.readValue(cached, EmailFull.class));
             } catch (JsonProcessingException ignored) {}
         }
         Counter.builder("email.cache.misses.total").register(meterRegistry).increment();
-        var row = emails.getRow(user.userId(), emailId).orElseThrow();
+        var rowOpt = emails.getRow(user.userId(), emailId);
+        if (rowOpt.isEmpty()) return ResponseEntity.notFound().build();
+        var row = rowOpt.get();
         var attachmentRefs = row.attachmentKeys.stream()
                 .map(k -> new EmailFull.AttachmentRef(displayName(k), k, attachments.presignDownload(k)))
                 .toList();
@@ -93,16 +95,18 @@ public class EmailController {
             redis.opsForValue().set(key, objectMapper.writeValueAsString(full),
                     Duration.ofSeconds(props.getCache().getEmailTtlSeconds()));
         } catch (JsonProcessingException ignored) {}
-        return full;
+        return ResponseEntity.ok(full);
     }
 
     // === Write paths ===
 
     @PostMapping("/emails/draft")
-    public DraftResponse draft(@AuthenticationPrincipal AuthenticatedUser user,
-                               @RequestBody EmailDraftRequest req) {
+    public ResponseEntity<DraftResponse> draft(@AuthenticationPrincipal AuthenticatedUser user,
+                                               @RequestBody EmailDraftRequest req) {
         UUID emailId = emails.generateEmailId();
-        UUID draftFolderId = folders.findByName(user.userId(), Folder.DRAFTS).orElseThrow().folderId();
+        var draftFolder = folders.findByName(user.userId(), Folder.DRAFTS).orElse(null);
+        if (draftFolder == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        UUID draftFolderId = draftFolder.folderId();
 
         var presigned = new ArrayList<AttachmentUpload>();
         var keys = new ArrayList<String>();
@@ -130,14 +134,21 @@ public class EmailController {
         row.preview = EmailRepository.preview(req.body());
         emails.create(row);
 
-        return new DraftResponse(emailId, presigned);
+        return ResponseEntity.ok(new DraftResponse(emailId, presigned));
     }
 
     @PostMapping("/emails/{emailId}/send")
     public ResponseEntity<SendResponse> send(@AuthenticationPrincipal AuthenticatedUser user,
                                              @PathVariable UUID emailId) {
         Timer.Sample sample = Timer.start(meterRegistry);
-        var draft = emails.getRow(user.userId(), emailId).orElseThrow();
+        // Read may race with the just-prior write under LOCAL_ONE; brief retry covers it.
+        EmailRepository.EmailRow found = null;
+        for (int i = 0; i < 3 && found == null; i++) {
+            found = emails.getRow(user.userId(), emailId).orElse(null);
+            if (found == null) try { Thread.sleep(10L * (1L << i)); } catch (InterruptedException ignored) {}
+        }
+        if (found == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        final EmailRepository.EmailRow draft = found;
 
         // Validate attachments exist in MinIO
         for (String key : draft.attachmentKeys) {
@@ -147,7 +158,9 @@ public class EmailController {
         }
 
         // Move sender's copy from DRAFTS → SENT
-        UUID sentFolderId = folders.findByName(user.userId(), Folder.SENT).orElseThrow().folderId();
+        var sentFolder = folders.findByName(user.userId(), Folder.SENT).orElse(null);
+        if (sentFolder == null) return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        UUID sentFolderId = sentFolder.folderId();
         emails.delete(user.userId(), emailId);
         var sentRow = copy(draft);
         sentRow.folderId = sentFolderId;
@@ -198,6 +211,9 @@ public class EmailController {
     public ResponseEntity<Void> markRead(@AuthenticationPrincipal AuthenticatedUser user,
                                          @PathVariable UUID emailId,
                                          @RequestBody MarkReadRequest req) {
+        if (emails.getRow(user.userId(), emailId).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
         emails.markRead(user.userId(), emailId, req.isRead());
         redis.delete(cacheKey(user.userId(), emailId));
         publisher.publish(new EmailEvent.EmailReadChanged(

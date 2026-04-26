@@ -35,10 +35,9 @@ public class FolderController {
     @DeleteMapping("/{folderId}")
     public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthenticatedUser user,
                                        @PathVariable UUID folderId) {
-        var existing = folders.findOne(user.userId(), folderId).orElseThrow();
-        if (existing.systemFolder()) {
-            return ResponseEntity.status(409).build();
-        }
+        var existing = folders.findOne(user.userId(), folderId).orElse(null);
+        if (existing == null) return ResponseEntity.notFound().build();
+        if (existing.systemFolder()) return ResponseEntity.status(409).build();
         folders.delete(user.userId(), folderId);
         return ResponseEntity.noContent().build();
     }

@@ -39,7 +39,8 @@ public class AuthController {
 
     @GetMapping("/profile")
     public ResponseEntity<UserProfile> profile(@AuthenticationPrincipal AuthenticatedUser user) {
-        var u = userRepository.findById(user.userId()).orElseThrow();
+        var u = userRepository.findById(user.userId()).orElse(null);
+        if (u == null) return ResponseEntity.notFound().build();
         return ResponseEntity.ok(new UserProfile(u.userId(), u.email(), u.displayName(), u.createdAt()));
     }
 }

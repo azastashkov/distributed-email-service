@@ -164,8 +164,8 @@ public class EmailRepository {
     }
 
     public void markRead(UUID userId, UUID emailId, boolean isRead) {
-        var existing = getRow(userId, emailId).orElseThrow();
-        if (existing.isRead == isRead) return;
+        var existing = getRow(userId, emailId).orElse(null);
+        if (existing == null || existing.isRead == isRead) return;
 
         // update emails_by_id and emails_by_folder atomically.
         var b = BatchStatement.builder(BatchType.LOGGED)
