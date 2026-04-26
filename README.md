@@ -221,8 +221,29 @@ Key panels:
 
 - Unit tests: `./gradlew test` (all modules)
 - Run only one module's tests: `./gradlew :web-server:test`
+- End-to-end smoke: `./scripts/smoke-test.sh` (requires running stack)
+- Live metrics report from Prometheus: `./scripts/load-test-report.sh`
 
-Most unit tests are pure Java with Jackson/JUnit/AssertJ; integration coverage for the storage layer is exercised end-to-end by the load test, which runs against the same Docker stack.
+Most unit tests are pure Java with Jackson/JUnit/AssertJ; integration coverage for the
+storage and event layers is exercised end-to-end by the load test, which runs against
+the same Docker stack.
+
+## Reference load-test result
+
+A 5-minute, 50-virtual-user, 7-operation-mix load test against the full stack
+on a developer laptop (M-series Mac, Docker Desktop) produced:
+
+| Metric | Value |
+|---|---|
+| Total operations | **27,915** (~93 ops/sec sustained) |
+| Server-side 5xx errors | **0** |
+| Client transient errors | 41 (0.15%, all from a mid-test nginx restart) |
+| Per-op p95 latency | getEmail 9.3ms · listFolder 6.2ms · listUnread 3.5ms · markRead 16.3ms · search 6.4ms · sendNoAtt 27.7ms · sendWithAtt 32.9ms |
+| Web RPS, web-server-1 vs -2 | balanced within 5% (after fresh nginx) |
+| WS messages pushed | **14,328** |
+| WS cross-instance forwards | **10,646** (proves Redis-backed forward path) |
+| WS end-to-end delivery lag | **p50 1.2ms · p95 2.3ms · p99 3.1ms** |
+| Cassandra ring | all 3 nodes UN, 100% effective ownership each, 10MB+ per node (replicated) |
 
 ## License
 
