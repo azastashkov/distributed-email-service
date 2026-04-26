@@ -1,0 +1,3 @@
+rootProject.name = 'distributed-email-service'
+
+include 'common', 'web-server', 'realtime-server', 'load-client'

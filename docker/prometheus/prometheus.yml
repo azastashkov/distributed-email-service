@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: web-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['web-server-1:8080','web-server-2:8080']
+        labels:
+          service: web
+
+  - job_name: realtime-server
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['realtime-server-1:8080','realtime-server-2:8080']
+        labels:
+          service: realtime
+
+  - job_name: load-client
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['load-client:9100']
+        labels:
+          service: load

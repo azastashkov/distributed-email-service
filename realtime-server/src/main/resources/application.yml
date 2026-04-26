@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: realtime-server
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: realtime
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.example.email.common.event,com.example.email.common.event.*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.example.email.common.event.EmailEvent
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  metrics:
+    tags:
+      service: realtime
+      instance: ${INSTANCE_ID:rt-local}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:0123456789abcdef0123456789abcdef0123456789abcdef}
+  instance-id: ${INSTANCE_ID:rt-local}
+  session-ttl-seconds: 300

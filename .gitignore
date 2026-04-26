@@ -1,0 +1,33 @@
+# Gradle
+build/
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Java
+*.class
+hs_err_pid*.log
+
+# Spring
+application-local.yml
+application-local.yaml
+application-local.properties
+
+# logs
+*.log
+
+# misc
+.env
+.env.local

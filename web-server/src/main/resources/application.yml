@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: web-server
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: search-indexer
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.example.email.common.event,com.example.email.common.event.*"
+        spring.json.use.type.headers: false
+        spring.json.value.default.type: com.example.email.common.event.EmailEvent
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      service: web
+      instance: ${INSTANCE_ID:web-local}
+
+app:
+  cassandra:
+    contact-points: ${CASSANDRA_CONTACT_POINTS:127.0.0.1:9042}
+    local-dc: ${CASSANDRA_LOCAL_DC:datacenter1}
+    keyspace: email_service
+  jwt:
+    secret: ${JWT_SECRET:0123456789abcdef0123456789abcdef0123456789abcdef}
+    ttl-minutes: 60
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:attachments}
+    region: us-east-1
+    presign-ttl-minutes: 15
+  opensearch:
+    uri: ${OPENSEARCH_URI:http://localhost:9200}
+    index: emails
+  cache:
+    email-ttl-seconds: 300
+  instance-id: ${INSTANCE_ID:web-local}
+  search-indexer-enabled: ${SEARCH_INDEXER_ENABLED:true}

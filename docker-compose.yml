@@ -1,0 +1,369 @@
+name: email-service
+
+# Anchors for shared service config.
+x-cassandra-base: &cassandra-base
+  image: cassandra:5.0
+  environment: &cassandra-env
+    CASSANDRA_CLUSTER_NAME: email
+    CASSANDRA_DC: dc1
+    CASSANDRA_RACK: rack1
+    CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    HEAP_NEWSIZE: 128M
+    MAX_HEAP_SIZE: 768M
+  healthcheck:
+    test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+    interval: 15s
+    timeout: 10s
+    retries: 20
+    start_period: 90s
+  networks: [email-net]
+
+x-app-env: &app-env
+  SPRING_PROFILES_ACTIVE: docker
+  CASSANDRA_CONTACT_POINTS: cassandra-1:9042,cassandra-2:9042,cassandra-3:9042
+  CASSANDRA_LOCAL_DC: dc1
+  KAFKA_BOOTSTRAP: kafka:9092
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  MINIO_ENDPOINT: http://minio:9000
+  # Inside docker compose, the load-client (and any other in-cluster client) reaches
+  # MinIO at hostname `minio`. For an external browser, add `127.0.0.1 minio` to /etc/hosts
+  # OR run a reverse proxy that maps a public hostname back to minio:9000.
+  MINIO_PUBLIC_ENDPOINT: http://minio:9000
+  MINIO_ACCESS_KEY: minioadmin
+  MINIO_SECRET_KEY: minioadmin
+  MINIO_BUCKET: attachments
+  OPENSEARCH_URI: http://opensearch:9200
+  JWT_SECRET: changeme-please-use-a-real-secret-with-32-bytes-or-more
+  SERVER_PORT: "8080"
+
+services:
+  # ===== Cassandra cluster =====
+  cassandra-1:
+    <<: *cassandra-base
+    container_name: cassandra-1
+    environment:
+      <<: *cassandra-env
+      CASSANDRA_SEEDS: cassandra-1
+    volumes:
+      - cassandra-1-data:/var/lib/cassandra
+
+  cassandra-2:
+    <<: *cassandra-base
+    container_name: cassandra-2
+    environment:
+      <<: *cassandra-env
+      CASSANDRA_SEEDS: cassandra-1
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+    volumes:
+      - cassandra-2-data:/var/lib/cassandra
+
+  cassandra-3:
+    <<: *cassandra-base
+    container_name: cassandra-3
+    environment:
+      <<: *cassandra-env
+      CASSANDRA_SEEDS: cassandra-1
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+      cassandra-2:
+        condition: service_healthy
+    volumes:
+      - cassandra-3-data:/var/lib/cassandra
+
+  cassandra-init:
+    image: cassandra:5.0
+    container_name: cassandra-init
+    depends_on:
+      cassandra-1: { condition: service_healthy }
+      cassandra-2: { condition: service_healthy }
+      cassandra-3: { condition: service_healthy }
+    volumes:
+      - ./docker/cassandra/init.cql:/init.cql:ro
+    command: >
+      bash -c "
+      until cqlsh cassandra-1 -e 'DESCRIBE CLUSTER' >/dev/null 2>&1; do
+        echo 'waiting for cassandra'; sleep 5;
+      done;
+      cqlsh cassandra-1 -f /init.cql && echo 'schema applied'"
+    restart: "no"
+    networks: [email-net]
+
+  # ===== Redis =====
+  redis:
+    image: redis:7.4-alpine
+    container_name: redis
+    ports:
+      - "26379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [email-net]
+
+  # ===== MinIO =====
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "29000:9000"
+      - "29001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - minio-data:/data
+    networks: [email-net]
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; do sleep 1; done
+        mc mb -p local/attachments || true
+        echo 'minio bucket ready'
+    restart: "no"
+    networks: [email-net]
+
+  # ===== OpenSearch =====
+  opensearch:
+    image: opensearchproject/opensearch:2.18.0
+    container_name: opensearch
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      bootstrap.memory_lock: "false"
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile:  { soft: 65536, hard: 65536 }
+    ports:
+      - "29200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks: [email-net]
+
+  # ===== Kafka (KRaft single broker) =====
+  kafka:
+    image: apache/kafka:3.9.2
+    container_name: kafka
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+    ports:
+      - "29092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks: [email-net]
+
+  kafka-init:
+    image: apache/kafka:3.9.2
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create \
+          --topic email-events --partitions 12 --replication-factor 1 --if-not-exists
+        echo 'kafka topic ready'
+    restart: "no"
+    networks: [email-net]
+
+  # ===== App services =====
+  web-server-1:
+    build:
+      context: .
+      dockerfile: web-server/Dockerfile
+    container_name: web-server-1
+    depends_on:
+      cassandra-init: { condition: service_completed_successfully }
+      kafka-init:     { condition: service_completed_successfully }
+      minio-init:     { condition: service_completed_successfully }
+      redis:          { condition: service_healthy }
+      opensearch:     { condition: service_healthy }
+    environment:
+      <<: *app-env
+      INSTANCE_ID: web-1
+      SEARCH_INDEXER_ENABLED: "true"
+    ports:
+      - "28081:8080"
+    networks: [email-net]
+
+  web-server-2:
+    build:
+      context: .
+      dockerfile: web-server/Dockerfile
+    container_name: web-server-2
+    depends_on:
+      cassandra-init: { condition: service_completed_successfully }
+      kafka-init:     { condition: service_completed_successfully }
+      minio-init:     { condition: service_completed_successfully }
+      redis:          { condition: service_healthy }
+      opensearch:     { condition: service_healthy }
+    environment:
+      <<: *app-env
+      INSTANCE_ID: web-2
+      SEARCH_INDEXER_ENABLED: "false"
+    ports:
+      - "28082:8080"
+    networks: [email-net]
+
+  realtime-server-1:
+    build:
+      context: .
+      dockerfile: realtime-server/Dockerfile
+    container_name: realtime-server-1
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      redis:      { condition: service_healthy }
+    environment:
+      <<: *app-env
+      INSTANCE_ID: rt-1
+    ports:
+      - "28181:8080"
+    networks: [email-net]
+
+  realtime-server-2:
+    build:
+      context: .
+      dockerfile: realtime-server/Dockerfile
+    container_name: realtime-server-2
+    depends_on:
+      kafka-init: { condition: service_completed_successfully }
+      redis:      { condition: service_healthy }
+    environment:
+      <<: *app-env
+      INSTANCE_ID: rt-2
+    ports:
+      - "28182:8080"
+    networks: [email-net]
+
+  # ===== Load balancers =====
+  nginx-web:
+    image: nginx:1.27-alpine
+    container_name: nginx-web
+    depends_on:
+      - web-server-1
+      - web-server-2
+    volumes:
+      - ./docker/nginx/web.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "28080:80"
+    networks: [email-net]
+
+  nginx-ws:
+    image: nginx:1.27-alpine
+    container_name: nginx-ws
+    depends_on:
+      - realtime-server-1
+      - realtime-server-2
+    volumes:
+      - ./docker/nginx/ws.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "28090:80"
+    networks: [email-net]
+
+  # ===== Observability =====
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: prometheus
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    ports:
+      - "29090:9090"
+    networks: [email-net]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/provisioning/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "23000:3000"
+    networks: [email-net]
+
+  # ===== Load test client (profile: test) =====
+  load-client:
+    build:
+      context: .
+      dockerfile: load-client/Dockerfile
+    container_name: load-client
+    profiles: ["test"]
+    depends_on:
+      nginx-web: { condition: service_started }
+      nginx-ws:  { condition: service_started }
+    environment:
+      LOAD_TARGET_WEB_URL: http://nginx-web:80
+      LOAD_TARGET_WS_URL:  ws://nginx-ws:80/ws
+      LOAD_USERS: "50"
+      LOAD_DURATION_SECONDS: "300"
+      LOAD_RAMP_SECONDS: "30"
+      LOAD_START_DELAY_SECONDS: "20"
+      MANAGEMENT_SERVER_PORT: "9100"
+    ports:
+      - "29100:9100"
+    networks: [email-net]
+
+networks:
+  email-net:
+    driver: bridge
+
+volumes:
+  cassandra-1-data:
+  cassandra-2-data:
+  cassandra-3-data:
+  minio-data:
+  opensearch-data:
+  kafka-data:

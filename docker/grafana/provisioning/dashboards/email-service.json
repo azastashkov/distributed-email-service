@@ -1,0 +1,107 @@
+{
+  "title": "Email Service",
+  "uid": "email-service",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Web RPS by URI",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 0},
+      "targets": [{
+        "expr": "sum by (uri) (rate(http_server_requests_seconds_count{service=\"web\"}[1m]))",
+        "legendFormat": "{{uri}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Web latency p95 (s)",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 0},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{service=\"web\"}[1m])))",
+        "legendFormat": "{{uri}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Web 5xx errors / sec",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 7},
+      "targets": [{
+        "expr": "sum (rate(http_server_requests_seconds_count{service=\"web\",status=~\"5..\"}[1m]))",
+        "legendFormat": "5xx", "refId": "A"
+      }]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Web RPS by instance (LB balance check)",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 7},
+      "targets": [{
+        "expr": "sum by (instance) (rate(http_server_requests_seconds_count{service=\"web\"}[1m]))",
+        "legendFormat": "{{instance}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "JVM heap (web servers)",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 14},
+      "targets": [{
+        "expr": "jvm_memory_used_bytes{service=\"web\",area=\"heap\"}",
+        "legendFormat": "{{instance}} {{id}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "WS active sessions",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 14},
+      "targets": [{
+        "expr": "ws_sessions_active",
+        "legendFormat": "{{instance}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "WS messages sent / sec",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 21},
+      "targets": [{
+        "expr": "sum by (type) (rate(ws_messages_sent_total[1m]))",
+        "legendFormat": "{{type}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "WS cross-instance forwards / sec",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 21},
+      "targets": [{
+        "expr": "sum (rate(ws_cross_instance_forwards_total[1m]))",
+        "legendFormat": "forwards", "refId": "A"
+      }]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Load client ops / sec",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 28},
+      "targets": [{
+        "expr": "sum by (op) (rate(loadclient_op_duration_seconds_count[1m]))",
+        "legendFormat": "{{op}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Load client op p95 (s)",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 28},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le, op) (rate(loadclient_op_duration_seconds_bucket[1m])))",
+        "legendFormat": "{{op}}", "refId": "A"
+      }]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "WS delivery lag p95 (s)",
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 35},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (le) (rate(loadclient_ws_delivery_lag_seconds_bucket[1m])))",
+        "legendFormat": "p95", "refId": "A"
+      }]
+    },
+    {
+      "id": 12, "type": "stat", "title": "Load client errors total",
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 35},
+      "targets": [{
+        "expr": "sum (loadclient_op_errors_total)",
+        "refId": "A"
+      }]
+    }
+  ]
+}

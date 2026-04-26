@@ -1,0 +1,13 @@
+build/
+.gradle/
+.idea/
+.vscode/
+*.iml
+.git/
+docker/
+diagrams/
+load-client/build
+web-server/build
+realtime-server/build
+common/build
+*.log
