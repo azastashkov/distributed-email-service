@@ -89,7 +89,7 @@
         <mxCell id="e11" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="web2" target="redis"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e12" style="endArrow=classic;html=1;" edge="1" parent="1" source="web1" target="minio"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e13" style="endArrow=classic;html=1;" edge="1" parent="1" source="web2" target="minio"><mxGeometry relative="1" as="geometry"/></mxCell>
-        <mxCell id="e14" style="endArrow=classic;html=1;" edge="1" parent="1" source="web1" target="kafka" edge="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="endArrow=classic;html=1;" edge="1" parent="1" source="web1" target="kafka"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e15" style="endArrow=classic;html=1;" edge="1" parent="1" source="web2" target="kafka"><mxGeometry relative="1" as="geometry"/></mxCell>
         <mxCell id="e16" style="endArrow=classic;html=1;dashed=1;" edge="1" parent="1" source="web1" target="opensearch"><mxGeometry relative="1" as="geometry"/></mxCell>
 
